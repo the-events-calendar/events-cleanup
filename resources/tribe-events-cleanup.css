@@ -1,0 +1,8 @@
+.wrap.tribe-events-cleanup table td.count {
+    padding-left: 1em;
+    text-align: right;
+}
+
+.wrap.tribe-events-cleanup .risk-warning .emphasize strong {
+    color: red;
+}
