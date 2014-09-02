@@ -29,6 +29,7 @@ class TribeEventsCleanup {
 	const EVENTS = 'tribe_events';
 	const VENUES = 'tribe_venue';
 	const ORGANIZERS = 'tribe_organizer';
+	const EVENT_CATEGORIES = 'tribe_events_cat';
 
 	protected $plugin_dir = '';
 	protected $plugin_url = '';
@@ -69,6 +70,7 @@ class TribeEventsCleanup {
 			'events' => $this->count_up( self::EVENTS ),
 			'venues' => $this->count_up( self::VENUES ),
 			'organizers' => $this->count_up( self::ORGANIZERS ),
+			'categories' => $this->count_categories(),
 			'options' => $this->settings_count(),
 			'capabilities' => $this->caps_count()
 		);
@@ -91,6 +93,26 @@ class TribeEventsCleanup {
 		global $wpdb;
 		$query = "SELECT COUNT(*) FROM $wpdb->posts WHERE `post_type` = '%s' LIMIT 1;";
 		return absint( $wpdb->get_var( $wpdb->prepare( $query, $post_type	) ) );
+	}
+
+	/**
+	 * Counts the number of event category terms currently in existence.
+	 *
+	 * @return int
+	 */
+	protected function count_categories() {
+		global $wpdb;
+		$query = "
+			SELECT
+			    COUNT(*)
+			FROM
+			    $wpdb->terms
+			        JOIN
+			    $wpdb->term_taxonomy USING (term_id)
+			WHERE
+			    taxonomy = 'tribe_events_cat';";
+
+		return (int) $wpdb->get_var( $query );
 	}
 
 	/**
@@ -247,6 +269,7 @@ class TribeEventsCleanup {
 			'do_tribe_cleanup' => 1,
 			'confirm_risk' => 1,
 		);
+
 		$url = add_query_arg( $params, $current_page );
 		return esc_url( $url );
 	}
@@ -254,10 +277,11 @@ class TribeEventsCleanup {
 	protected function keep_cleaning() {
 		$this->in_progress = true;
 
-		if ( $this->counts->events > 0 ) $this->clean( self::EVENTS );
-		elseif ( $this->counts->venues > 0 ) $this->clean( self::VENUES );
-		elseif ( $this->counts->organizers > 0 ) $this->clean( self::ORGANIZERS );
-		elseif ( $this->counts->capabilities > 0 ) $this->clean_caps();
+		if ( $this->counts->events > 0 ) $this->remove_posts( self::EVENTS );
+		elseif ( $this->counts->venues > 0 ) $this->remove_posts( self::VENUES );
+		elseif ( $this->counts->organizers > 0 ) $this->remove_posts( self::ORGANIZERS );
+		elseif ( $this->counts->categories > 0 ) $this->remove_terms();
+		elseif ( $this->counts->capabilities > 0 ) $this->remove_caps();
 		elseif ( $this->counts->options > 0 ) $this->clean_options();
 		else flush_rewrite_rules( true );
 	}
@@ -267,30 +291,67 @@ class TribeEventsCleanup {
 	 *
 	 * @param $post_type
 	 */
-	protected function clean( $post_type ) {
+	protected function remove_posts( $post_type ) {
 		global $wpdb;
+
 		$query = "SELECT ID FROM $wpdb->posts WHERE `post_type` = '%s' LIMIT %d;";
 		$post_ids = $wpdb->get_col( $wpdb->prepare( $query, $post_type, $this->batch ) );
-		if ( !is_array( $post_ids ) || empty( $post_ids) ) return;
-		foreach ( $post_ids as $id ) wp_delete_post( $id, true );
+
+		if ( ! is_array( $post_ids ) || empty( $post_ids) ) return;
+
+		foreach ( $post_ids as $id ) {
+			wp_delete_post( $id, true );
+		}
+	}
+
+	/**
+	 * Carries out a purge of event category terms.
+	 */
+	protected function remove_terms()
+	{
+		global $wpdb;
+
+		$query = "
+			SELECT
+			    term_id
+			FROM
+			    $wpdb->terms
+			        JOIN
+			    $wpdb->term_taxonomy USING (term_id)
+			WHERE
+			    taxonomy = 'tribe_events_cat'
+			LIMIT
+				%d;
+		";
+
+		$term_ids = $wpdb->get_col( $wpdb->prepare( $query, $this->batch ) );
+
+		if ( ! is_array( $term_ids ) || empty( $term_ids ) ) return;
+
+		foreach ( $term_ids as $id ) {
+			wp_delete_term( $id, self::EVENT_CATEGORIES );
+		}
 	}
 
 	/**
 	 * Removes user role capabilities that look as though they relate to The Events Calendar.
 	 */
-	protected function clean_caps() {
+	protected function remove_caps() {
 		global $wp_roles;
 
+		// Inspect each role
 		foreach ( $wp_roles->roles as $role_slug => $user_role ) {
+			// Look at the capabilities assigned to each
 			foreach ( $user_role['capabilities'] as $capability => $on ) {
+				// If they look "tribal", then remove them
 				if ( $this->looks_tribal( $capability ) ) {
-					$this->clean_cap( $role_slug, $capability );
+					$this->remove_cap( $role_slug, $capability );
 				}
 			}
 		}
 	}
 
-	protected function clean_cap( $role, $capability ) {
+	protected function remove_cap( $role, $capability ) {
 		$role = get_role( $role );
 		if ( null === $role ) return;
 		$role->remove_cap( $capability );

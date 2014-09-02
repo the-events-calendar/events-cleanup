@@ -19,6 +19,11 @@
 		</tr>
 
 		<tr>
+			<td> <?php _e( 'Event categories', 'tribe-events-cleanup' ) ?> </td>
+			<td class="count"> <strong> <?php esc_html_e( $plugin->counts->categories ) ?> </strong> </td>
+		</tr>
+
+		<tr>
 			<td> <?php _e( 'Options/settings', 'tribe-events-cleanup' ) ?> </td>
 			<td class="count"> <strong> <?php esc_html_e( $plugin->counts->options ) ?> </strong> </td>
 		</tr>
