@@ -93,12 +93,27 @@ class TribeEventsCleanup {
 		return absint( $wpdb->get_var( $wpdb->prepare( $query, $post_type	) ) );
 	}
 
+	/**
+	 * We look for and count the number of option table entries where the option name
+	 * itself contains both 'tribe' and 'events'.
+	 *
+	 * This avoids the need to maintain and keep in sync a whitelist of actual options.
+	 *
+	 * @return int
+	 */
 	protected function settings_count() {
 		global $wpdb;
 		$query = "SELECT COUNT(*) FROM $wpdb->options WHERE `option_name` LIKE '%tribe%events%';";
 		return absint( $wpdb->get_var( $query ) );
 	}
 
+	/**
+	 * Counts the number of currently registered user role capabilities that "look tribal" and
+	 * are likely to have been generated in relation to The Events Calendar/Events Calendar PRO,
+	 * etc.
+	 *
+	 * @return int
+	 */
 	protected function caps_count() {
 		global $wp_roles;
 		$count = 0;
@@ -112,6 +127,13 @@ class TribeEventsCleanup {
 		return $count;
 	}
 
+	/**
+	 * If the provided string contains 'tribe' and one of 'event', 'venue' or
+	 * 'organizer' it will return true.
+	 *
+	 * @param $string
+	 * @return bool
+	 */
 	protected function looks_tribal( $string ) {
 		$string = strtolower( $string );
 		if ( false === strpos( $string, 'tribe' ) ) return false;
@@ -121,6 +143,9 @@ class TribeEventsCleanup {
 		return false;
 	}
 
+	/**
+	 * Position our menu entry within the existing Tools section.
+	 */
 	public function add_admin_screen() {
 		$page_title = __( 'The Events Calendar: Cleanup Tool', 'tribe-events-cleanup' );
 		$menu_title = __( 'Events Cleanup', 'tribe-events-cleanup' );
@@ -129,6 +154,10 @@ class TribeEventsCleanup {
 		add_management_page( $page_title, $menu_title, $this->capability, 'tribe-events-cleanup', $callback );
 	}
 
+	/**
+	 * Test to see if A) The Events Calendar is still active and B) if there is in fact
+	 * any data to be cleaned up.
+	 */
 	public function basic_checks() {
 		if ( class_exists( 'TribeEvents' ) ) {
 			$warning = __( '<strong> The Events Calendar %s still appears to be active. </strong> Please deactivate The Events Calendar plus any related add-ons prior to using this tool!', 'tribe-events-cleanup' );
@@ -153,10 +182,12 @@ class TribeEventsCleanup {
 	public function do_cleanup() {
 		if ( ! $this->pre_cleanup_checks() ) return;
 
+		// Keep cleaning so long as we haven't exceeded the timeout (or number of items to be processed in a single batch)
 		while ( $this->time_left() && $this->job_incomplete() ) {
 			$this->keep_cleaning();
 		}
 
+		// If the cleanup needs to spand multiple requests then inform the customer that work is still in progress
 		if ( $this->job_incomplete() ) {
 			$spinner = '<img src="' . get_admin_url( null, 'images/spinner.gif' ) . '" alt="Working" />';
 			$this->notices[] = __( 'Clean-up still in progress&hellip;', 'tribe-events-cleanup' ) . $spinner;
@@ -183,17 +214,32 @@ class TribeEventsCleanup {
 		return true;
 	}
 
+	/**
+	 * Tracks time spent cleaning (to avoid hitting the timeout limit).
+	 *
+	 * @return bool
+	 */
 	protected function time_left() {
 		if ( 0 === $this->clock ) $this->clock = time();
 		return ( time() - $this->clock < $this->timeout );
 	}
 
+	/**
+	 * Determines if more work still needs to be done to complete the cleanup.
+	 *
+	 * @return bool
+	 */
 	protected function job_incomplete() {
 		$this->get_counts();
 		$counts = (array) $this->counts;
 		return max( $counts ) > 0;
 	}
 
+	/**
+	 * Generate a URL that triggers a continuation of the cleanup process.
+	 *
+	 * @return string
+	 */
 	public function reload_link() {
 		$current_page = admin_url( $GLOBALS['pagenow'] . '?page=tribe-events-cleanup' );
 		$params = array(
@@ -216,6 +262,11 @@ class TribeEventsCleanup {
 		else flush_rewrite_rules( true );
 	}
 
+	/**
+	 * Carries out a purge of posts of the specified post type.
+	 *
+	 * @param $post_type
+	 */
 	protected function clean( $post_type ) {
 		global $wpdb;
 		$query = "SELECT ID FROM $wpdb->posts WHERE `post_type` = '%s' LIMIT %d;";
@@ -224,6 +275,9 @@ class TribeEventsCleanup {
 		foreach ( $post_ids as $id ) wp_delete_post( $id, true );
 	}
 
+	/**
+	 * Removes user role capabilities that look as though they relate to The Events Calendar.
+	 */
 	protected function clean_caps() {
 		global $wp_roles;
 
